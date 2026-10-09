@@ -1,6 +1,6 @@
 // API Helper for Backend Communication
 
-const BASE_URL = '/api';
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://anbu-friend-ecom.onrender.com/api';
 
 export const fetchProducts = async (category = '') => {
   try {

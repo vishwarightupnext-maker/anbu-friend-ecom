@@ -33,7 +33,12 @@ import {
   Sliders,
   Save,
   Layers,
-  Key
+  Key,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  RotateCcw
 } from 'lucide-react';
 import { 
   fetchOrders, 
@@ -66,11 +71,50 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Search & Filters
+  // Search, Date Range & Pagination Filters for Sales
   const [salesSearch, setSalesSearch] = useState('');
   const [salesFilter, setSalesFilter] = useState('all'); // 'all' | 'paid' | 'pending'
+  const [salesFromDate, setSalesFromDate] = useState('');
+  const [salesToDate, setSalesToDate] = useState('');
+  const [salesCurrentPage, setSalesCurrentPage] = useState(1);
+  const [salesItemsPerPage, setSalesItemsPerPage] = useState(10);
   const [productSearch, setProductSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+
+  // Date Preset Quick Handler
+  const handleDatePreset = (preset) => {
+    const today = new Date();
+    const formatDateStr = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    if (preset === 'today') {
+      const dStr = formatDateStr(today);
+      setSalesFromDate(dStr);
+      setSalesToDate(dStr);
+    } else if (preset === '7days') {
+      const past = new Date();
+      past.setDate(today.getDate() - 7);
+      setSalesFromDate(formatDateStr(past));
+      setSalesToDate(formatDateStr(today));
+    } else if (preset === '30days') {
+      const past = new Date();
+      past.setDate(today.getDate() - 30);
+      setSalesFromDate(formatDateStr(past));
+      setSalesToDate(formatDateStr(today));
+    } else if (preset === 'month') {
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      setSalesFromDate(formatDateStr(firstDay));
+      setSalesToDate(formatDateStr(today));
+    } else if (preset === 'clear') {
+      setSalesFromDate('');
+      setSalesToDate('');
+    }
+    setSalesCurrentPage(1);
+  };
 
   // Selected Order Detail Modal
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -168,7 +212,7 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
 
   const totalDownloads = products.reduce((sum, p) => sum + (p.downloadsCount || 0), 0);
 
-  // Filter Sales / All Buys
+  // Filter Sales / All Buys with Date Range Filter
   const filteredOrders = orders.filter(order => {
     const q = salesSearch.toLowerCase();
     const matchesSearch = 
@@ -179,10 +223,37 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
       (order.orderItems || []).some(item => (item.name || '').toLowerCase().includes(q));
 
     const isPaid = order.paymentDetails?.status === 'paid' || order.paymentDetails?.status === 'completed';
-    if (salesFilter === 'paid') return matchesSearch && isPaid;
-    if (salesFilter === 'pending') return matchesSearch && !isPaid;
-    return matchesSearch;
+    let matchesStatus = true;
+    if (salesFilter === 'paid') matchesStatus = isPaid;
+    if (salesFilter === 'pending') matchesStatus = !isPaid;
+
+    // Date Range Filter (From Date to To Date)
+    let matchesDate = true;
+    const orderDateRaw = order.createdAt || order.date || order.paymentDetails?.date;
+    if (orderDateRaw && (salesFromDate || salesToDate)) {
+      const oDate = new Date(orderDateRaw);
+      if (salesFromDate) {
+        const fDate = new Date(salesFromDate);
+        fDate.setHours(0, 0, 0, 0);
+        if (oDate < fDate) matchesDate = false;
+      }
+      if (salesToDate) {
+        const tDate = new Date(salesToDate);
+        tDate.setHours(23, 59, 59, 999);
+        if (oDate > tDate) matchesDate = false;
+      }
+    }
+
+    return matchesSearch && matchesStatus && matchesDate;
   });
+
+  // Sales Pagination Slicing
+  const totalSalesPages = Math.ceil(filteredOrders.length / salesItemsPerPage) || 1;
+  const currentSalesPage = Math.min(salesCurrentPage, totalSalesPages);
+  const paginatedOrders = filteredOrders.slice(
+    (currentSalesPage - 1) * salesItemsPerPage,
+    currentSalesPage * salesItemsPerPage
+  );
 
   // Filter Products List
   const filteredProducts = products.filter(p => {
@@ -305,6 +376,12 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
   // Open Full Edit Product Modal
   const handleOpenEdit = (product) => {
     setEditingProduct(product);
+    const existingImgs = Array.isArray(product.images) && product.images.filter(Boolean).length > 0
+      ? product.images.filter(Boolean)
+      : [product.image || ''];
+
+    const existingBundles = Array.isArray(product.bundledProductIds) ? product.bundledProductIds : [];
+
     setEditForm({
       name: product.name || '',
       price: product.price || 0,
@@ -318,6 +395,13 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
       author: product.author || '',
       fileSize: product.fileSize || '12.5 MB',
       image: product.image || '',
+      img1: existingImgs[0] || product.image || '',
+      img2: existingImgs[1] || '',
+      img3: existingImgs[2] || '',
+      img4: existingImgs[3] || '',
+      b1: existingBundles[0] || '',
+      b2: existingBundles[1] || '',
+      b3: existingBundles[2] || '',
       cloudinaryUrl: product.cloudinaryUrl || product.pdfUrl || product.pngUrl || '',
       inStock: product.inStock !== undefined ? product.inStock : true,
       stock: product.stock !== undefined ? product.stock : 9999
@@ -331,7 +415,17 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
 
     try {
       const prodId = editingProduct.id || editingProduct._id;
-      const updated = await updateProduct(prodId, editForm);
+      const imagesList = [editForm.img1, editForm.img2, editForm.img3, editForm.img4].filter(Boolean);
+      const bundledList = [editForm.b1, editForm.b2, editForm.b3].filter(Boolean);
+
+      const payload = {
+        ...editForm,
+        image: imagesList[0] || editForm.image,
+        images: imagesList.length > 0 ? imagesList : [editForm.image],
+        bundledProductIds: bundledList
+      };
+
+      const updated = await updateProduct(prodId, payload);
       setProducts(prev => prev.map(p => (p.id || p._id) === prodId ? updated : p));
       setEditingProduct(null);
       await loadData();
@@ -821,42 +915,130 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
                 </div>
               )}
 
-              {/* SECTION 2: SALES LIST & ALL BUYS */}
+              {/* SECTION 2: SALES LIST & ALL BUYS WITH DATE FILTERS & PAGINATION */}
               {activeTab === 'sales' && (
-                <div className="space-y-4">
-                  {/* Search and Filter bar */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-zinc-200 shadow-xs">
-                    <div className="relative flex-1 w-full">
-                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-                      <input
-                        type="text"
-                        value={salesSearch}
-                        onChange={(e) => setSalesSearch(e.target.value)}
-                        placeholder="Search sales by buyer name, email, phone, or order ID..."
-                        className="w-full pl-10 pr-4 py-2.5 text-xs bg-zinc-50 border border-zinc-200 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 font-medium"
-                      />
+                <div className="space-y-4 font-sans">
+                  
+                  {/* Modern Search & Date Filter Card */}
+                  <div className="bg-white p-5 rounded-3xl border border-zinc-200 shadow-xs space-y-4">
+                    
+                    {/* Top Row: Search input & Status pills */}
+                    <div className="flex flex-col lg:flex-row items-center justify-between gap-3">
+                      <div className="relative flex-1 w-full">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                        <input
+                          type="text"
+                          value={salesSearch}
+                          onChange={(e) => {
+                            setSalesSearch(e.target.value);
+                            setSalesCurrentPage(1);
+                          }}
+                          placeholder="Search sales by buyer name, email, phone, or order ID..."
+                          className="w-full pl-10 pr-4 py-2.5 text-xs bg-zinc-50 border border-zinc-200 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 font-medium"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-xs font-bold w-full lg:w-auto">
+                        <button
+                          onClick={() => { setSalesFilter('all'); setSalesCurrentPage(1); }}
+                          className={`px-3.5 py-2 rounded-xl cursor-pointer transition-colors ${salesFilter === 'all' ? 'bg-[#0d382c] text-white shadow-xs' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'}`}
+                        >
+                          All ({orders.length})
+                        </button>
+                        <button
+                          onClick={() => { setSalesFilter('paid'); setSalesCurrentPage(1); }}
+                          className={`px-3.5 py-2 rounded-xl cursor-pointer transition-colors ${salesFilter === 'paid' ? 'bg-emerald-700 text-white shadow-xs' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                        >
+                          Paid ({paidOrdersCount})
+                        </button>
+                        <button
+                          onClick={() => { setSalesFilter('pending'); setSalesCurrentPage(1); }}
+                          className={`px-3.5 py-2 rounded-xl cursor-pointer transition-colors ${salesFilter === 'pending' ? 'bg-amber-700 text-white shadow-xs' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                        >
+                          Pending ({orders.length - paidOrdersCount})
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-xs font-bold w-full sm:w-auto">
-                      <button
-                        onClick={() => setSalesFilter('all')}
-                        className={`px-3 py-1.5 rounded-xl cursor-pointer ${salesFilter === 'all' ? 'bg-[#0d382c] text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'}`}
-                      >
-                        All ({orders.length})
-                      </button>
-                      <button
-                        onClick={() => setSalesFilter('paid')}
-                        className={`px-3 py-1.5 rounded-xl cursor-pointer ${salesFilter === 'paid' ? 'bg-emerald-700 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
-                      >
-                        Paid ({paidOrdersCount})
-                      </button>
-                      <button
-                        onClick={() => setSalesFilter('pending')}
-                        className={`px-3 py-1.5 rounded-xl cursor-pointer ${salesFilter === 'pending' ? 'bg-amber-700 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
-                      >
-                        Pending ({orders.length - paidOrdersCount})
-                      </button>
+                    {/* Bottom Row: Modern From/To Date Picker & Date Presets */}
+                    <div className="pt-3 border-t border-zinc-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                      
+                      {/* From & To Date Pickers */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 bg-zinc-50 border border-zinc-200 rounded-2xl px-3 py-1.5">
+                          <Calendar className="h-4 w-4 text-emerald-700 shrink-0" />
+                          <span className="text-[10px] font-bold text-zinc-500 uppercase">From:</span>
+                          <input
+                            type="date"
+                            value={salesFromDate}
+                            onChange={(e) => {
+                              setSalesFromDate(e.target.value);
+                              setSalesCurrentPage(1);
+                            }}
+                            className="bg-transparent text-xs font-semibold text-zinc-800 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5 bg-zinc-50 border border-zinc-200 rounded-2xl px-3 py-1.5">
+                          <Calendar className="h-4 w-4 text-emerald-700 shrink-0" />
+                          <span className="text-[10px] font-bold text-zinc-500 uppercase">To:</span>
+                          <input
+                            type="date"
+                            value={salesToDate}
+                            onChange={(e) => {
+                              setSalesToDate(e.target.value);
+                              setSalesCurrentPage(1);
+                            }}
+                            className="bg-transparent text-xs font-semibold text-zinc-800 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Quick Date Presets */}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase mr-1">Quick Date:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDatePreset('today')}
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold rounded-lg text-[10px] cursor-pointer"
+                        >
+                          Today
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDatePreset('7days')}
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold rounded-lg text-[10px] cursor-pointer"
+                        >
+                          Last 7 Days
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDatePreset('30days')}
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold rounded-lg text-[10px] cursor-pointer"
+                        >
+                          Last 30 Days
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDatePreset('month')}
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold rounded-lg text-[10px] cursor-pointer"
+                        >
+                          This Month
+                        </button>
+
+                        {(salesFromDate || salesToDate) && (
+                          <button
+                            type="button"
+                            onClick={() => handleDatePreset('clear')}
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-lg text-[10px] flex items-center gap-1 cursor-pointer"
+                          >
+                            <RotateCcw className="h-3 w-3" /> Reset Filter
+                          </button>
+                        )}
+                      </div>
+
                     </div>
+
                   </div>
 
                   {/* Sales Table */}
@@ -878,11 +1060,11 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
                           {filteredOrders.length === 0 ? (
                             <tr>
                               <td colSpan={7} className="px-6 py-12 text-center text-zinc-400">
-                                No sales transactions match your query.
+                                No sales transactions match your date range or search query.
                               </td>
                             </tr>
                           ) : (
-                            filteredOrders.map((order) => {
+                            paginatedOrders.map((order) => {
                               const isPaid = order.paymentDetails?.status === 'paid' || order.paymentDetails?.status === 'completed';
                               return (
                                 <tr key={order._id || order.id} className="hover:bg-zinc-50 transition-colors">
@@ -941,6 +1123,74 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* MODERN PAGINATION FOOTER */}
+                    {filteredOrders.length > 0 && (
+                      <div className="px-6 py-4 bg-zinc-50 border-t border-zinc-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-600">
+                        
+                        {/* Summary & Page Size selector */}
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold text-zinc-700">
+                            Showing <strong className="text-zinc-900">{(currentSalesPage - 1) * salesItemsPerPage + 1}</strong> to <strong className="text-zinc-900">{Math.min(currentSalesPage * salesItemsPerPage, filteredOrders.length)}</strong> of <strong className="text-zinc-900">{filteredOrders.length}</strong> orders
+                          </span>
+
+                          <div className="flex items-center gap-1 text-xs">
+                            <span className="text-zinc-400">Rows per page:</span>
+                            <select
+                              value={salesItemsPerPage}
+                              onChange={(e) => {
+                                setSalesItemsPerPage(Number(e.target.value));
+                                setSalesCurrentPage(1);
+                              }}
+                              className="px-2 py-1 bg-white border border-zinc-300 rounded-lg font-bold text-zinc-800 focus:outline-none"
+                            >
+                              <option value={5}>5</option>
+                              <option value={10}>10</option>
+                              <option value={20}>20</option>
+                              <option value={50}>50</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Page Buttons */}
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={currentSalesPage <= 1}
+                            onClick={() => setSalesCurrentPage(prev => Math.max(prev - 1, 1))}
+                            className="p-1.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:hover:bg-white text-zinc-700 transition-colors cursor-pointer"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+
+                          {Array.from({ length: totalSalesPages }, (_, i) => i + 1).map((pg) => (
+                            <button
+                              key={pg}
+                              type="button"
+                              onClick={() => setSalesCurrentPage(pg)}
+                              className={`h-8 w-8 rounded-xl font-extrabold text-xs transition-colors cursor-pointer ${
+                                currentSalesPage === pg
+                                  ? 'bg-[#0d382c] text-white shadow-xs'
+                                  : 'bg-white border border-zinc-200 text-zinc-700 hover:bg-zinc-100'
+                              }`}
+                            >
+                              {pg}
+                            </button>
+                          ))}
+
+                          <button
+                            type="button"
+                            disabled={currentSalesPage >= totalSalesPages}
+                            onClick={() => setSalesCurrentPage(prev => Math.min(prev + 1, totalSalesPages))}
+                            className="p-1.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:hover:bg-white text-zinc-700 transition-colors cursor-pointer"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
+
+                      </div>
+                    )}
+
                   </div>
                 </div>
               )}
@@ -1467,6 +1717,102 @@ export default function AdminDashboard({ onClose, onProductsUpdated }) {
                     onChange={(e) => setEditForm({ ...editForm, resolution: e.target.value })}
                     className="w-full px-3.5 py-2 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:border-zinc-900 font-medium"
                   />
+                </div>
+              </div>
+
+              {/* 4 IMAGES FILE UPLOADS */}
+              <div className="space-y-2 bg-zinc-50 p-3.5 rounded-2xl border border-zinc-200">
+                <label className="block font-bold text-zinc-900 text-[11px] uppercase tracking-wider flex items-center justify-between">
+                  <span>Product Gallery Image Files (4 Slots)</span>
+                  <span className="text-[10px] text-zinc-400 font-normal">Click slot to upload file</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { field: 'img1', label: 'Primary Image 1' },
+                    { field: 'img2', label: 'Gallery Image 2' },
+                    { field: 'img3', label: 'Gallery Image 3' },
+                    { field: 'img4', label: 'Gallery Image 4' }
+                  ].map(({ field, label }, idx) => {
+                    const imgVal = editForm[field];
+                    return (
+                      <div key={idx} className="bg-white rounded-xl p-2 border border-zinc-200 text-center space-y-1 shadow-xs">
+                        <span className="text-[9px] font-bold text-zinc-700 block truncate">{label}</span>
+                        {imgVal ? (
+                          <div className="relative aspect-square w-full rounded-lg bg-zinc-50 border border-zinc-200 overflow-hidden flex items-center justify-center p-0.5">
+                            <img src={imgVal} alt={`Slot ${idx + 1}`} className="max-h-full max-w-full object-contain" />
+                            <button
+                              type="button"
+                              onClick={() => setEditForm(prev => ({ ...prev, [field]: '' }))}
+                              className="absolute top-1 right-1 p-0.5 bg-red-600 text-white rounded-full"
+                              title="Remove File"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <label className="aspect-square rounded-lg border-2 border-dashed border-zinc-300 hover:border-emerald-500 bg-zinc-50 flex flex-col items-center justify-center p-1 cursor-pointer">
+                            <Upload className="h-4 w-4 text-zinc-400 mb-1" />
+                            <span className="text-[9px] font-bold text-zinc-700">Upload File</span>
+                            <input
+                              type="file"
+                              accept="image/*, application/pdf"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  setEditForm(prev => ({ ...prev, [field]: ev.target.result }));
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* BUNDLE SELECTION */}
+              <div className="space-y-1.5 bg-emerald-50/60 p-3 rounded-2xl border border-emerald-200">
+                <label className="block font-bold text-emerald-950 text-[11px] uppercase tracking-wider">
+                  Configure Bundle Products (Select up to 3)
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <select
+                    value={editForm.b1 || ''}
+                    onChange={(e) => setEditForm({ ...editForm, b1: e.target.value })}
+                    className="px-2 py-1 bg-white border border-emerald-300 rounded-lg text-[11px]"
+                  >
+                    <option value="">-- Bundle Product 1 --</option>
+                    {products.map(p => (
+                      <option key={p.id || p._id} value={p.id || p._id}>{p.name} (₹{p.price})</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={editForm.b2 || ''}
+                    onChange={(e) => setEditForm({ ...editForm, b2: e.target.value })}
+                    className="px-2 py-1 bg-white border border-emerald-300 rounded-lg text-[11px]"
+                  >
+                    <option value="">-- Bundle Product 2 --</option>
+                    {products.map(p => (
+                      <option key={p.id || p._id} value={p.id || p._id}>{p.name} (₹{p.price})</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={editForm.b3 || ''}
+                    onChange={(e) => setEditForm({ ...editForm, b3: e.target.value })}
+                    className="px-2 py-1 bg-white border border-emerald-300 rounded-lg text-[11px]"
+                  >
+                    <option value="">-- Bundle Product 3 --</option>
+                    {products.map(p => (
+                      <option key={p.id || p._id} value={p.id || p._id}>{p.name} (₹{p.price})</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

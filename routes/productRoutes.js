@@ -181,6 +181,18 @@ const formatProduct = (p) => {
   obj.resolution = obj.resolution || (obj.fileType === 'pdf' ? 'PDF Document' : '3840 x 2160 (4K UHD)');
   obj.fileSize = obj.fileSize || '12.5 MB';
   obj.cloudinaryUrl = obj.cloudinaryUrl || obj.pdfUrl || obj.pngUrl || obj.image;
+  
+  // Handle up to 4 product images
+  const imgs = Array.isArray(obj.images) && obj.images.filter(Boolean).length > 0
+    ? obj.images.filter(Boolean)
+    : (obj.image ? [obj.image] : []);
+  obj.images = imgs.slice(0, 4);
+  if (!obj.image && obj.images.length > 0) {
+    obj.image = obj.images[0];
+  }
+
+  // Handle bundled product IDs (up to 3)
+  obj.bundledProductIds = Array.isArray(obj.bundledProductIds) ? obj.bundledProductIds.slice(0, 3) : [];
   return obj;
 };
 
@@ -334,6 +346,8 @@ router.post('/', async (req, res) => {
       description,
       price,
       image,
+      images,
+      bundledProductIds,
       pngUrl,
       pdfUrl,
       fileType,
@@ -349,6 +363,10 @@ router.post('/', async (req, res) => {
     const isPdf = fileType === 'pdf' || (pdfUrl && pdfUrl.includes('.pdf'));
     const newId = `digital-prod-${Date.now()}`;
     const cloudLink = cloudinaryUrl || pdfUrl || pngUrl || `https://res.cloudinary.com/varahi-digital-assets/image/upload/v1700000000/uploads/${newId}.${isPdf ? 'pdf' : 'png'}`;
+    const primaryImg = image || (Array.isArray(images) && images[0]) || (isPdf ? 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80' : pngUrl);
+    const finalImagesList = (Array.isArray(images) && images.filter(Boolean).length > 0)
+      ? images.filter(Boolean).slice(0, 4)
+      : [primaryImg];
 
     const productData = {
       _id: newId,
@@ -358,9 +376,11 @@ router.post('/', async (req, res) => {
       price: price ? parseFloat(price) : 299,
       originalPrice: price ? parseFloat(price) * 1.5 : 599,
       discount: 33,
-      image: image || (isPdf ? 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80' : pngUrl),
+      image: primaryImg,
+      images: finalImagesList,
+      bundledProductIds: Array.isArray(bundledProductIds) ? bundledProductIds.slice(0, 3) : [],
       fileType: isPdf ? 'pdf' : 'png',
-      pngUrl: isPdf ? '' : (pngUrl || image || ''),
+      pngUrl: isPdf ? '' : (pngUrl || primaryImg || ''),
       pdfUrl: isPdf ? (pdfUrl || cloudLink) : '',
       cloudinaryUrl: cloudLink,
       category: categoryName || (isPdf ? 'E-Books (PDF)' : 'Custom Uploads'),
@@ -409,7 +429,7 @@ router.put('/:id', async (req, res) => {
       if (product) {
         const fieldsToUpdate = [
           'name', 'description', 'price', 'originalPrice', 'discount',
-          'image', 'category', 'categoryId', 'categoryName', 'unit',
+          'image', 'images', 'bundledProductIds', 'category', 'categoryId', 'categoryName', 'unit',
           'stock', 'soldOut', 'offer', 'rating', 'reviewsCount', 'inStock',
           'isDigital', 'fileType', 'pngUrl', 'pdfUrl', 'cloudinaryUrl',
           'resolution', 'pages', 'author', 'fileSize'

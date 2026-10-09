@@ -17,10 +17,12 @@ export default function Navbar({
 
   const categories = [
     { id: '', label: 'All Digital Assets' },
-    { id: 'ebooks-pdf', label: 'E-Books (PDF)' },
-    { id: 'digital-yantra', label: 'Digital Yantras' },
-    { id: 'sacred-symbols', label: 'Sacred Symbols' },
-    { id: 'custom-uploads', label: 'Uploaded Assets' }
+    { id: 'trackers', label: 'Trackers' },
+    { id: 'business-tools', label: 'Business Tools' },
+    { id: 'templates', label: 'Templates' },
+    { id: 'ebooks', label: 'E-Books' },
+    { id: 'courses', label: 'Courses' },
+    { id: 'saas-products', label: 'SaaS Products' }
   ];
 
   return (
